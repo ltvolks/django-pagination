@@ -7,6 +7,13 @@ from django import template
 from django.http import Http404
 from django.core.paginator import Paginator, InvalidPage
 from django.conf import settings
+from django.template import (
+    Context,
+    Node,
+    TemplateSyntaxError,
+)
+from django.template.loader import select_template
+from django.utils.text import unescape_string_literal
 
 register = template.Library()
 
@@ -103,6 +110,48 @@ class AutoPaginateNode(template.Node):
         context['paginator'] = paginator
         context['page_obj'] = page_obj
         return u''
+
+
+
+class PaginateNode(Node):
+
+    def __init__(self, template=None):
+        self.template = template
+
+    def render(self, context):
+        template_list = ['pagination/pagination.html']
+        to_return = paginate(context)
+        if self.template:
+            template_list.insert(0, self.template)
+        t = select_template(template_list)
+        if not t:
+            return None
+        context = Context(to_return)
+        return t.render(context)
+
+
+def do_paginate(parser, token):
+    """
+    Emits the pagination control for the most recent autopaginate list
+
+    Syntax is:
+
+        paginate [using "TEMPLATE"]
+
+    Where TEMPLATE is a quoted template name. If missing the default template
+    is used (paginate/pagination.html).
+    """
+    argv = token.split_contents()
+    argc = len(argv)
+    if argc == 1:
+        template = None
+    elif argc == 3 and argv[1] == 'using':
+        template = unescape_string_literal(argv[2])
+    else:
+        raise TemplateSyntaxError(
+            "Invalid syntax. Proper usage of this tag is: "
+            "{% paginate [using \"TEMPLATE\"] %}")
+    return PaginateNode(template)
 
 
 def paginate(context, window=DEFAULT_WINDOW, hashtag=''):
@@ -225,6 +274,8 @@ def paginate(context, window=DEFAULT_WINDOW, hashtag=''):
     except (KeyError, AttributeError):
         return {}
 
-register.inclusion_tag('pagination/pagination.html', takes_context=True)(
-    paginate)
+
+register.tag('paginate', do_paginate)
+#register.inclusion_tag('pagination/pagination.html', takes_context=True)(
+#    paginate)
 register.tag('autopaginate', do_autopaginate)
