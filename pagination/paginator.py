@@ -1,5 +1,13 @@
 from django.core.paginator import Paginator, Page, PageNotAnInteger, EmptyPage
 
+class InvalidPageSize(Exception):
+    pass
+
+class InvalidPageQueryset(Exception):
+    pass
+
+
+
 class InfinitePaginator(Paginator):
     """
     Paginator designed for cases when it's not important to know how many total
@@ -169,3 +177,64 @@ class FinitePage(InfinitePage):
         """
         ## TODO should this holler if you haven't defined the offset?
         return self.paginator.offset
+
+
+
+
+class SingleObjectPage(Page):
+    """A page that tracks its associated object/item separately as self.object.
+    """
+    def __init__(self, object_list, number, paginator):
+        super(SingleObjectPage, self).__init__(object_list, number, paginator)
+        self.object = object_list[0]
+
+    def next_page(self):
+        """Return the next page object. If at the end, return the first page
+        object"""
+        try:
+            return self.paginator.page(self.next_page_number())
+        except:
+            return self.paginator.page(1)
+
+
+    def previous_page(self):
+        """Return the prev page object. If at the beginning, return the last
+        page object"""
+        try:
+            return self.paginator.page(self.previous_page_number())
+        except:
+            return self.paginator.page(self.paginator.num_pages)
+
+
+
+class SingleObjectPaginator(Paginator):
+    """
+    Paginator that augments Page objects with next/prev object information
+    suitable for retrieving those objects directly
+    """
+    def __init__(self, object_list):
+        self.object_list = object_list
+        # Compat w/ Paginator
+        self.per_page = 1
+        self.orphans = 0
+        self.allow_empty_first_page = False
+        self._num_pages = self._count = None
+
+
+    def page(self, number):
+        """Returns a Page object for the given 1-based page number."""
+        number = self.validate_number(number)
+        bottom = (number - 1)
+        top = bottom + 1
+        if top >= self.count:
+            top = self.count
+        return SingleObjectPage(self.object_list[bottom:top], number, self)
+
+
+    def object_page(self, object_item):
+        """Returns a Page object for the given object"""
+        positions = [i+1 for i,x in enumerate(self.object_list) if x==object_item]
+        if positions:
+            return self.page(positions[0])
+        else:
+            raise InvalidPageQueryset("%s not present in the paginator object_list")
