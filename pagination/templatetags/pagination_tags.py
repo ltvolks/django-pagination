@@ -11,6 +11,8 @@ from django.template import (
     Context,
     Node,
     TemplateSyntaxError,
+    Variable,
+    VariableDoesNotExist,
 )
 from django.template.loader import select_template
 from django.utils.text import unescape_string_literal
@@ -115,8 +117,11 @@ class AutoPaginateNode(template.Node):
 
 class PaginateNode(Node):
 
-    def __init__(self, template=None):
+    def __init__(self, template=None, url_prefix=None):
         self.template = template
+        self.url_prefix = url_prefix
+        if url_prefix:
+            self.url_prefix = Variable(url_prefix)
 
     def render(self, context):
         template_list = ['pagination/pagination.html']
@@ -126,7 +131,14 @@ class PaginateNode(Node):
         t = select_template(template_list)
         if not t:
             return None
+        if self.url_prefix:
+            try:
+                self.url_prefix = self.url_prefix.resolve(context)
+            except VariableDoesNotExist:
+                self.url_prefix = None
         context = Context(to_return)
+        # Adding an attribute to page_obj may not be the ideal solution
+        context['page_obj'].url_prefix = self.url_prefix or ''
         return t.render(context)
 
 
@@ -136,22 +148,32 @@ def do_paginate(parser, token):
 
     Syntax is:
 
-        paginate [using "TEMPLATE"]
+        paginate [[using "TEMPLATE"] url_prefix]
 
-    Where TEMPLATE is a quoted template name. If missing the default template
-    is used (paginate/pagination.html).
+    Where:
+
+        - TEMPLATE is a quoted template name. If missing, the default template
+          is used (paginate/pagination.html).
+        - url_prefix is an optional variable containing the base url for pagination.
+          If missing, it defaults to "".
     """
     argv = token.split_contents()
     argc = len(argv)
+    url_prefix = None
     if argc == 1:
         template = None
     elif argc == 3 and argv[1] == 'using':
         template = unescape_string_literal(argv[2])
+    elif argc == 4 and argv[1] == 'using':
+        template = unescape_string_literal(argv[2])
+        url_prefix = argv[3]
+        if url_prefix.startswith('"') or url_prefix.startswith("'"):
+            url_prefix = unescape_string_literal(argv[3])
     else:
         raise TemplateSyntaxError(
             "Invalid syntax. Proper usage of this tag is: "
-            "{% paginate [using \"TEMPLATE\"] %}")
-    return PaginateNode(template)
+            "{% paginate [[using \"TEMPLATE\"] url_prefix] %}")
+    return PaginateNode(template, url_prefix)
 
 
 def paginate(context, window=DEFAULT_WINDOW, hashtag=''):
